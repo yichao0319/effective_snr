@@ -15,8 +15,15 @@ It includes the following parts:
 ##########
 ## RawOFDM
 I use the following commands to collect CSIs:
-  sudo ./ofdm_tx.py -f 2.4e9 -v -s 96
-  sudo ./ofdm_rx.py -f 2.4e9 -v -s 96 --rxdata RXDATA --snrdata SNRDATA --snrmode 3 --rx-gain 30
+  sudo ./ofdm_tx.py -f 2.4e9 -v -s 50 --amp=0.5
+  sudo ./ofdm_rx.py -f 2.4e9 -v -s 50 --rxdata RXDATA --snrdata SNRDATA --snrmode 3 --rx-gain 30
+
+  sudo ../qam_tx.py -v --outfile OUTFILE -s 50 --bitrate=1
+  sudo ../qam_rx.py -v --infile OUTFILE -s 50 --bitrate=1 --rxdata RXDATA --berdata=BERDATA
+
+  sudo ../qam_tx.py -v -f 2.4e9 -s 50 --bitrate=1
+  sudo ../qam_rx.py -v -f 2.4e9 -s 50 --bitrate=1 --rxdata RXDATA --berdata=BERDATA
+
 
 - Note that I implement "snrmode 3" in RawOFDM which reports SNR for all symbols.
 - The tips to install RawOFDM written by Apurv is also attached in the end of this README.
@@ -49,7 +56,10 @@ e.g.
   analyze_csi('RXDATA.s96.pdat', 'SNRDATA.s96.pdat');
 
 or run in the batch script:
-  matlab -e 'batch_analyze_csi;'
+  matlab -r 'batch_analyze_csi;'
+
+or use condor:
+  condor_submit batch_analyze_csi.condor
 
 
 
@@ -153,6 +163,15 @@ src/lib/qam/raw_crc.cc
 replace gr_crc32 by digital_crc32:
   gr_crc32 -> digital_crc32
 
+6.5
+for some machines, if the following error occurs:
+<Error: bad register name `%dil'>
+
+then modify:
+src/lib/spiral/parity.h
+
+line 8,   __asm__ __volatile__ ("test %1,%1;setpo %0" : "=g"(x) : "r" (x));
+change to __asm__ __volatile__ ("test %1,%1;setpo %0" : "=q"(x) : "q" (x));
 
 
 7. make; sudo make install

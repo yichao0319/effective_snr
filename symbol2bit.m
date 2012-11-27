@@ -15,15 +15,15 @@ function [bit] = symbol2bit(mod_type, sym)
                 real_part = real(sym(row_i, col_i) );
                 imag_part = imag(sym(row_i, col_i) );
                 if(real_part > 0)
-                    bit(row_i, 2*(col_i-1)+1) = 1;
+                    bit(row_i, m*(col_i-1)+1) = 1;
                 else
-                    bit(row_i, 2*(col_i-1)+1) = 0;
+                    bit(row_i, m*(col_i-1)+1) = 0;
                 end
 
                 if(imag_part > 0)
-                    bit(row_i, 2*col_i) = 1;
+                    bit(row_i, m*col_i) = 1;
                 else
-                    bit(row_i, 2*col_i) = 0;
+                    bit(row_i, m*col_i) = 0;
                 end
             end
         end

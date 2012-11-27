@@ -20,7 +20,18 @@
 % end
 
 
-function [ber] = SNR2BER(mod_type, snr)
+function [ber] = SNR2BER(mod_type, snr, func)
+    if strcmp(func, 'FORMULA')
+        ber = SNR2BER_fomula(mod_type, snr);
+    elseif strcmp(func, 'THRESHOLD')
+        ber = SNR2BER_threshold(mod_type, snr);
+    else
+        error('unknown convertion function');
+    end
+end
+
+
+function [ber] = SNR2BER_fomula(mod_type, snr)
     snr = power(10, snr / 10);    %% dB to power
     % snr = 80 / 52 * snr;
 
@@ -40,6 +51,21 @@ function [ber] = SNR2BER(mod_type, snr)
         error('Unimplemented modulation');
     end
 end
+
+
+function [ber] = SNR2BER_threshold(mod_type, snr)
+    [row col] = size(snr);
+
+    ber = zeros(size(snr));
+    for row_i = 1:row
+        for col_i = 1:col
+            if snr(row_i, col_i) < 1
+                ber(row_i, col_i) = 0.5;
+            end
+        end
+    end
+end
+
 
 
 %% qfunc: function description

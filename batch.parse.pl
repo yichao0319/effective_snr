@@ -33,8 +33,19 @@ my @rx_symbol_files = (
     # "RXDATA.static.s16",
     # "RXDATA.static.s32",
     # "RXDATA.static.s64",
-    "RXDATA.s96",
-    "RXDATA.s96-2"
+    # "RXDATA.s96",
+    # "RXDATA.s96-2"
+    # "RXDATA.static.highSNR"
+    "RXDATA.static.highSNR.2",
+    "RXDATA.static.highSNR.d1",
+    "RXDATA.static.highSNR.d1.2",
+    "RXDATA.static.highSNR.d2",
+    "RXDATA.static.highSNR.d6",
+    "RXDATA.static.highSNR.d6.2",
+    "RXDATA.mobile.highSNR",
+    "RXDATA.mobile.highSNR.1",
+    "RXDATA.mobile.highSNR.b1",
+    "RXDATA.mobile.highSNR.b2"
     );
 my @snr_files = (
     # "SNRDATA.static.d0", "SNRDATA.static.d6", 
@@ -49,8 +60,8 @@ my @snr_files = (
     # "SNRDATA.static.s16",
     # "SNRDATA.static.s32",
     # "SNRDATA.static.s64"
-    "SNRDATA.s96",
-    "SNRDATA.s96-2"
+    # "SNRDATA.s96",
+    # "SNRDATA.s96-2"
     );
 
 #####
