@@ -73,7 +73,8 @@ void set_data(const char *filename)
         //     //printf("importing symbol %d with cong real: %f and imag: %f\n",index, creal(d_preamble[index]), cimag(d_preamble[index]));
         //cout << "importing symbol " << index << " with cong " << d_preamble[index] << " abs " << std::abs(d_preamble[index]) /*<< " arg " << std::arg(d_preamble[index]) */ << "\n" ;
         //cout << index << " " << d_data[index] << '\n';
-        cout << index << " " << abs(d_data[index]) << " " << arg(d_data[index]) << " " << d_data[index].real() << " " << d_data[index].imag() << '\n';
+        // cout << index << " " << abs(d_data[index]) << " " << arg(d_data[index]) << " " << d_data[index].real() << " " << d_data[index].imag() << '\n';
+        cout << d_data[index].real() << " " << d_data[index].imag() << '\n';
         // cout << abs(d_data[index]) << " " << arg(d_data[index]) << " " << d_data[index].real() << " " << d_data[index].imag() << '\n';
         /*
         if(d_data[index].imag() < 1e-6) {

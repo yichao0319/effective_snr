@@ -12,22 +12,31 @@
 %     [PREAMBLE | ENTIRE]
 %   method_snr2ber: the function used to convert SNR to BER
 %     [FORMULA | THRESHOLD]
+%   method_FEC
+%     [NO_FEC | FEC_RS | FEC_DIVERSITY_GAIN]
+%   method_estimate_frame_err: the way to estimate frame error rate
+%     [FROM_BER | GILBERT]
 %   num_ofdm_symbol_per_pkt:
 %   modulation:
 %     [BPSK | QPSK | 16QAM | 64QAM]
+%   code_rate_k: message length
+%   code_rate_n: block length
 %   alpha: the parameter for EWMA
 %
 % Output:
+%   avg_actual_ber, avg_predit_ber, actual_frame_err_rate, estimated_frame_err_rate
 %
 %
 % Example:
-%   analyze_csi('RXDATA.s96-2.pdat', 'ORACLE', 'ACTUAL_SNR', 'PREAMBLE', 90, 'QPSK', 1)
+%   analyze_csi('RXDATA.s96-2.pdat', 'ORACLE', 'ACTUAL_SNR', 'PREAMBLE', 'FORMULA', 'NO_FEC', 'FROM_BER', 90, 'QPSK', 1, 2, 1)
 %
 
-function [avg_actual_ber, avg_predit_ber] = analyze_csi(input_sym_file, ...
-                     method_prediction, method_get_ber, method_pkt_ber, method_snr2ber, ...
-                     num_ofdm_symbol_per_pkt, modulation, ...
-                     alpha)
+function [avg_actual_ber, avg_predit_ber, actual_frame_err_rate, estimated_frame_err_rate] = analyze_csi(...
+                    input_sym_file, ...
+                    method_prediction, method_get_ber, method_pkt_ber, method_snr2ber, ...
+                    method_FEC, method_estimate_frame_err, ...
+                    num_ofdm_symbol_per_pkt, modulation, ...
+                    code_rate_k, code_rate_n, alpha)
     
 
     %% ----------------------------------
@@ -52,11 +61,18 @@ function [avg_actual_ber, avg_predit_ber] = analyze_csi(input_sym_file, ...
     SNR2BER_FORMULA = 'FORMULA';
     SNR2BER_THRESHOLD = 'THRESHOLD';
 
+    FRAME_ERR_FROM_BER = 'FROM_BER';
+    FRAME_ERR_GILBERT = 'GILBERT';
+
+    FEC_NO = 'NO_FEC';
+    FEC_RS = 'RS';
+    FEC_DIVERSITY_GAIN = 'DIVERSITY_GAIN';
+
     REMOVE_OUTLIER = 0;
     REMOVE_RAWOFDM_EMPTY_PERIOD = 1;
     READ_SNRDATA = 0;
     DEBUG_EXCEL_CHECK = 0;
-    DEBUG_EVALUATE_FORMULA = 1;
+    DEBUG_EVALUATE_FORMULA = 0;
 
     
     
@@ -75,6 +91,9 @@ function [avg_actual_ber, avg_predit_ber] = analyze_csi(input_sym_file, ...
     if strcmp(method_snr2ber, SNR2BER_FORMULA)
         snr_shift = 1.5;
     end
+    if strcmp(method_FEC, FEC_DIVERSITY_GAIN)
+        snr_shift = snr_shift + 3;
+    end
     num_preamble_ofdm_sym = 2;
 
     max_snr = 100;
@@ -88,6 +107,9 @@ function [avg_actual_ber, avg_predit_ber] = analyze_csi(input_sym_file, ...
     %% ----------------------------------
     % initinalization
     [qpsk_table, num_bit_per_sym] = mod_table(MODULATION_QPSK);
+    num_bits_per_frame = num_subcarriers * num_ofdm_symbol_per_pkt * num_bit_per_sym;
+    code_rate = code_rate_k / code_rate_n;
+    fprintf('code rate = %f\n', code_rate);
 
 
     
@@ -158,7 +180,8 @@ function [avg_actual_ber, avg_predit_ber] = analyze_csi(input_sym_file, ...
         num_pkts = 1;
         pkt_start_ind_ary = [];
         sym_i = 1;
-        while sym_i < num_symbols - num_subcarriers*num_ofdm_symbol_per_pkt
+        while sym_i < num_symbols - num_subcarriers*num_ofdm_symbol_per_pkt - 1
+            not_found = 0;
             while ~( ( real(data_cpx(sym_i  )) < 0 & imag(data_cpx(sym_i  )) < 0 ) & ...
                      ( real(data_cpx(sym_i+1)) < 0 & imag(data_cpx(sym_i+1)) > 0 ) & ...
                      ( real(data_cpx(sym_i+2)) > 0 & imag(data_cpx(sym_i+2)) < 0 ) & ...
@@ -168,9 +191,15 @@ function [avg_actual_ber, avg_predit_ber] = analyze_csi(input_sym_file, ...
                      ( real(data_cpx(sym_i+6)) > 0 & imag(data_cpx(sym_i+6)) > 0 ) )
 
                 sym_i = sym_i + 1;
+                if sym_i >= num_symbols - num_subcarriers*num_ofdm_symbol_per_pkt
+                    not_found = 1;
+                    break;
+                end
             end
-            pkt_start_ind_ary = [pkt_start_ind_ary sym_i];
-            sym_i = sym_i + num_subcarriers*num_ofdm_symbol_per_pkt;
+            if not_found == 0
+                pkt_start_ind_ary = [pkt_start_ind_ary sym_i];
+                sym_i = sym_i + num_subcarriers*num_ofdm_symbol_per_pkt;
+            end
 
             % if length(pkt_start_ind_ary) > num_pkts
             %     break;
@@ -347,14 +376,16 @@ function [avg_actual_ber, avg_predit_ber] = analyze_csi(input_sym_file, ...
         print(f10, '-dpsc', [figure_dir input_sym_file '.' method_snr2ber '.evm2ber.ps']);
         % return;
     end
-    
+
 
 
 
     %% ----------------------------------
     % 3. get packet BER
+    %    estimated frame error rate
     actual_pkt_ber = zeros(num_subcarriers, num_pkts);          % e.g. actual_pkt_ber: (48 * x)
     estimated_pkt_ber = zeros(num_subcarriers, num_pkts);       % e.g. estimated_pkt_ber: (48 * x)
+    estimated_frame_err = zeros(num_pkts, 1);                   % e.g. estimated_frame_err: (x)
 
     for pkt_i = 1:num_pkts
         % actual packet BER
@@ -362,14 +393,14 @@ function [avg_actual_ber, avg_predit_ber] = analyze_csi(input_sym_file, ...
         pkt_end_bit_ind = pkt_i     * num_bit_per_sym * num_ofdm_symbol_per_pkt;
         this_rx_bit_grid = rx_bit_grid(:, pkt_str_bit_ind:pkt_end_bit_ind);
         actual_pkt_ber(:, pkt_i) = get_bit_error_rate(this_rx_bit_grid, tx_bit_grid);
-        
+
 
         % estimated packet BER
         pkt_str_ofdm_ind = (pkt_i-1) * num_ofdm_symbol_per_pkt + 1;
         pkt_end_ofdm_ind = pkt_i     * num_ofdm_symbol_per_pkt;
-        
 
         if strcmp(method_get_ber, GET_BER_AVERAGE_SNR)
+            % packet BER
             this_snr_grid = snr_per_sym(:, pkt_str_ofdm_ind:pkt_end_ofdm_ind);
             if strcmp(method_pkt_ber, PACKET_BER_PREAMBLE)
                 this_pkt_snr = get_snr_of_packet_preamble(this_snr_grid, num_preamble_ofdm_sym);
@@ -381,18 +412,29 @@ function [avg_actual_ber, avg_predit_ber] = analyze_csi(input_sym_file, ...
 
             else
                 error('unknown method to get packet BER');
-            end            
+            end
+
+            % frame error rate
+            this_ber = mean(estimated_pkt_ber(:, pkt_i));
+            estimated_frame_err(pkt_i) = 1 - power(1 - this_ber, num_bits_per_frame);
 
         else
             this_ber_grid = ber_per_sym(:, pkt_str_ofdm_ind:pkt_end_ofdm_ind);
             if strcmp(method_pkt_ber, PACKET_BER_PREAMBLE)
                 estimated_pkt_ber(:, pkt_i) = get_ber_of_packet_preamble(this_ber_grid, 'mean', num_preamble_ofdm_sym);
+
+                % frame error rate
+                this_ber = mean(estimated_pkt_ber(:, pkt_i));
+                estimated_frame_err(pkt_i) = 1 - power(1 - this_ber, num_bits_per_frame);
+
             elseif strcmp(method_pkt_ber, PACKET_BER_ENTIRE)
                 estimated_pkt_ber(:, pkt_i) = get_ber_of_packet_entire(this_ber_grid, 'mean');
+
+                % frame error rate
+                estimated_frame_err(pkt_i) = 1 - prod(prod(1-this_ber_grid));
             else
                 error('unknown method to get packet BER');
             end
-
         end
     end
 
@@ -418,15 +460,16 @@ function [avg_actual_ber, avg_predit_ber] = analyze_csi(input_sym_file, ...
         
         
     %% ----------------------------------
-    % 5. evaluation
+    % 5. evaluate BER prediction
     %   i) get error per pkt
     prediction_err_per_pkt = abs(mean(actual_pkt_ber(:, 2:end), 1) - mean(predicted_estimated_pkt_ber(:, 2:end), 1) );
     prediction_err_per_pkt_ratio = prediction_err_per_pkt ./ mean(actual_pkt_ber(:, 2:end), 1);
+    
     dlmwrite([output_dir input_sym_file '.' method_prediction '.' method_get_ber '.' method_pkt_ber '.' method_snr2ber '.pkt.eval.txt'], [prediction_err_per_pkt' mean(actual_pkt_ber(:, 2:end), 1)' prediction_err_per_pkt_ratio']);
     % fprintf('error per pkt = \n');
     % fprintf('%f,', prediction_err_per_pkt_ratio);
     % fprintf('\n');
-    
+
     f5a = figure;
     plot(1:num_pkts-1, mean(actual_pkt_ber(:, 2:end), 1), ...
          1:num_pkts-1, mean(predicted_estimated_pkt_ber(:, 2:end), 1), ...
@@ -435,7 +478,7 @@ function [avg_actual_ber, avg_predit_ber] = analyze_csi(input_sym_file, ...
     ylabel('BER');
     legend('actual', 'predicted', 'error');
     print(f5a, '-dpsc', [figure_dir input_sym_file '.' method_prediction '.' method_get_ber '.' method_pkt_ber '.' method_snr2ber '.pkt.eval.ps']);
-    
+
 
     %   ii) get error per subcarrier
     prediction_err_per_sc = abs(mean(actual_pkt_ber(:, 2:end), 2) - mean(predicted_estimated_pkt_ber(:, 2:end), 2) );
@@ -463,551 +506,99 @@ function [avg_actual_ber, avg_predit_ber] = analyze_csi(input_sym_file, ...
     prediction_err_whole_ratio = prediction_err_whole / avg_actual_ber;
     dlmwrite([output_dir input_sym_file '.' method_prediction '.' method_get_ber '.' method_pkt_ber '.' method_snr2ber '.whole.eval.txt'], [avg_predit_ber avg_actual_ber prediction_err_whole prediction_err_whole_ratio]);
     % fprintf('error as a whole = |%f - %f| / %f = %f\n', avg_actual_ber, avg_predit_ber, avg_actual_ber, prediction_err_whole_ratio);
-    
 
 
-
-    % %   i) knowing the tx and rx symbols, we can calculate the exact SNRs
-    % actual_snr = calculate_actual_SNR(rx_grid, tx_grid) + snr_shift;
-    % %   ii) converted from EVM calculated from closest constellation points
-    % snr_from_guessed_evm = EVM2SNR(guessed_evm) + snr_shift;
-    % %   iii) converted from EVM knowing the correct constellation points
-    % snr_from_actual_evm = EVM2SNR(actual_evm) + snr_shift;
-
-
-    % %% ----------------------------------
-    % % 3. BER per symbols (from SNR)
-    % ber_from_actual_snr = SNR2BER(modulation, actual_snr, method_snr2ber);
-    % ber_from_guessed_evm = SNR2BER(modulation, snr_from_guessed_evm, method_snr2ber);
-    % ber_from_actual_evm = SNR2BER(modulation, snr_from_actual_evm, method_snr2ber);
-    % disp(sprintf('ber_from_actual_snr  size: %d, %d', size(ber_from_actual_snr) ));
-    % disp(sprintf('ber_from_guessed_evm size: %d, %d', size(ber_from_guessed_evm) ));
-    % disp(sprintf('ber_from_actual_evm size: %d, %d', size(ber_from_actual_evm) ));
+    %% ----------------------------------
+    % 6. actual frame error rate
+    actual_frame_err_rate = 0;
+    actual_frame_err = mean(actual_pkt_ber);
+    if length(actual_frame_err) ~= num_pkts
+        error('wrong number of frames');
+    end
 
 
-    % %% ----------------------------------
-    % % 4. BER per packets
-    % num_pkts = floor(size(rx_grid, 2) / num_ofdm_symbol_per_pkt);
-    % fprintf('number of packets: %d\n', num_pkts);
-    
-    % % i) from tx and rx bit
-    % pkt_ber_from_rxtx_bit = zeros(num_subcarriers, num_pkts);
+    if strcmp(method_FEC, FEC_NO)
+        % the frame is corrupted when number of error rate > 0
 
-    % % ii) from preamble
-    % pkt_ber_preamble_from_actual_snr_mean = zeros(num_subcarriers, num_pkts);
-    % pkt_ber_preamble_from_guessed_evm_mean = zeros(num_subcarriers, num_pkts);
-    % pkt_ber_preamble_from_actual_evm_mean = zeros(num_subcarriers, num_pkts);
+        num_frames_with_err = length(find(actual_frame_err > 0));
+        num_frames = length(find(actual_frame_err >= 0));
+        if num_frames ~= num_pkts
+            error('wrong number of frames');
+        end
+        actual_frame_err_rate = num_frames_with_err / num_frames;
 
-    % pkt_ber_preamble_from_actual_snr_calculation = zeros(num_subcarriers, num_pkts);
-    % pkt_ber_preamble_from_guessed_evm_calculation = zeros(num_subcarriers, num_pkts);
-    % pkt_ber_preamble_from_actual_evm_calculation = zeros(num_subcarriers, num_pkts);
+    elseif strcmp(method_FEC, FEC_RS)
+        % the frame is corrupted when number of error rate > 1 - code rate
+        num_frames_with_err = length(find(actual_frame_err > (1-code_rate)));
+        num_frames = length(find(actual_frame_err >= 0));
+        if num_frames ~= num_pkts
+            error('wrong number of frames');
+        end
+        actual_frame_err_rate = num_frames_with_err / num_frames;
 
-    % % iii) from entire packet
-    % pkt_ber_entire_from_actual_snr_mean = zeros(num_subcarriers, num_pkts);
-    % pkt_ber_entire_from_guessed_evm_mean = zeros(num_subcarriers, num_pkts);
-    % pkt_ber_entire_from_actual_evm_mean = zeros(num_subcarriers, num_pkts);
+    elseif strcmp(method_FEC, FEC_DIVERSITY_GAIN)
+        % the frame is corrupted when number of error rate > 1 - code rate
+        num_frames_with_err = length(find(actual_frame_err > (1-code_rate)));
+        num_frames = length(find(actual_frame_err >= 0));
+        if num_frames ~= num_pkts
+            error('wrong number of frames');
+        end
+        actual_frame_err_rate = num_frames_with_err / num_frames;
 
-    % pkt_ber_entire_from_actual_snr_calculation = zeros(num_subcarriers, num_pkts);
-    % pkt_ber_entire_from_guessed_evm_calculation = zeros(num_subcarriers, num_pkts);
-    % pkt_ber_entire_from_actual_evm_calculation = zeros(num_subcarriers, num_pkts);
+    else
+        error('wrong method to estimate frame error rate\n');
+    end
 
-    % for pkt_i = 1:num_pkts
-    % % for pkt_i = 1:1
-    %     pkt_start_ind = (pkt_i-1) * num_ofdm_symbol_per_pkt + 1;
-    %     pkt_end_ind   = pkt_i * num_ofdm_symbol_per_pkt;
-    %     % fprintf('pkt: %d, %d~%d\n', pkt_i, pkt_start_ind, pkt_end_ind);
-
-
-    %     % i) from tx and rx bit
-    %     pkt_bit_start_ind = (pkt_i-1) * 2 * num_ofdm_symbol_per_pkt + 1;
-    %     pkt_bit_end_ind   = pkt_i * 2 * num_ofdm_symbol_per_pkt;
-    %     rx_bit_grid = rx_bit_grid(:, pkt_bit_start_ind:pkt_bit_end_ind);
-    %     pkt_ber_from_rxtx_bit(:, pkt_i) = get_bit_error_rate(rx_bit_grid, tx_bit_grid);
-    %     % fprintf('actual BER: ')
-    %     % fprintf('%f, ', pkt_ber_from_rxtx_bit(:, pkt_i));
-    %     % fprintf('\n');
+    fprintf('actual frame error rate = %f\n', actual_frame_err_rate);
 
 
-    %     % ii) from preamble
-    %     pkt_ber_preamble_from_actual_snr_mean(:, pkt_i) = ...
-    %         get_ber_of_packet_preamble(ber_from_actual_snr(:, pkt_start_ind:pkt_end_ind), 'mean');
-    %     pkt_ber_preamble_from_guessed_evm_mean(:, pkt_i) = ...
-    %         get_ber_of_packet_preamble(ber_from_guessed_evm(:, pkt_start_ind:pkt_end_ind), 'mean');
-    %     pkt_ber_preamble_from_actual_evm_mean(:, pkt_i) = ...
-    %         get_ber_of_packet_preamble(ber_from_actual_evm(:, pkt_start_ind:pkt_end_ind), 'mean');
-    %     % fprintf('estimated BER from preamble: ')
-    %     % fprintf('%f, ', pkt_ber_preamble_from_actual_snr_mean(:, pkt_i));
-    %     % fprintf('\n');
+    %% ----------------------------------
+    % 7. estimated frame error rate
+    estimated_frame_err_rate = 0;
+    estimated_frame_err2 = 1 - power(1 - mean(predicted_estimated_pkt_ber), num_bits_per_frame);
 
-    %     pkt_ber_preamble_from_actual_snr_calculation(:, pkt_i) = ...
-    %         get_ber_of_packet_preamble(ber_from_actual_snr(:, pkt_start_ind:pkt_end_ind), 'calculation');
-    %     pkt_ber_preamble_from_guessed_evm_calculation(:, pkt_i) = ...
-    %         get_ber_of_packet_preamble(ber_from_guessed_evm(:, pkt_start_ind:pkt_end_ind), 'calculation');
-    %     pkt_ber_preamble_from_actual_evm_calculation(:, pkt_i) = ...
-    %         get_ber_of_packet_preamble(ber_from_actual_evm(:, pkt_start_ind:pkt_end_ind), 'calculation');
+    if length(estimated_frame_err) ~= num_pkts
+        error('wrong number of frames');
+    end
+    if length(estimated_frame_err2) ~= num_pkts
+        error('wrong number of frames');
+    end
         
 
-    %     % iii) from entire packet
-    %     pkt_ber_entire_from_actual_snr_mean(:, pkt_i) = ...
-    %         get_ber_of_packet_entire(ber_from_actual_snr(:, pkt_start_ind:pkt_end_ind), 'mean');
-    %     pkt_ber_entire_from_guessed_evm_mean(:, pkt_i) = ...
-    %         get_ber_of_packet_entire(ber_from_guessed_evm(:, pkt_start_ind:pkt_end_ind), 'mean');
-    %     pkt_ber_entire_from_actual_evm_mean(:, pkt_i) = ...
-    %         get_ber_of_packet_entire(ber_from_actual_evm(:, pkt_start_ind:pkt_end_ind), 'mean');
-    %     % fprintf('estimated BER from entire packet: ')
-    %     % fprintf('%f, ', pkt_ber_entire_from_actual_snr_mean(:, pkt_i));
-    %     % fprintf('\n');
+    if strcmp(method_FEC, FEC_NO)
+        % the frame is corrupted when number of error rate > 0
+        estimated_frame_err_rate = mean(estimated_frame_err);
 
+        % method 2
+        estimated_frame_err_rate = mean(estimated_frame_err2);
 
-    %     pkt_ber_entire_from_actual_snr_calculation(:, pkt_i) = ...
-    %         get_ber_of_packet_entire(ber_from_actual_snr(:, pkt_start_ind:pkt_end_ind), 'calculation');
-    %     pkt_ber_entire_from_guessed_evm_calculation(:, pkt_i) = ...
-    %         get_ber_of_packet_entire(ber_from_guessed_evm(:, pkt_start_ind:pkt_end_ind), 'calculation');
-    %     pkt_ber_entire_from_actual_evm_calculation(:, pkt_i) = ...
-    %         get_ber_of_packet_entire(ber_from_actual_evm(:, pkt_start_ind:pkt_end_ind), 'calculation');
-    % end
+    elseif strcmp(method_FEC, FEC_RS)
+        % the frame is corrupted when number of error rate > 1 - code rate
+        corrected_frame_ind = find(estimated_frame_err <= 1-code_rate);
+        estimated_frame_err(corrected_frame_ind) = 0;
+        estimated_frame_err_rate = mean(estimated_frame_err);
 
+        % method 2
+        corrected_frame_ind = find(estimated_frame_err2 <= 1-code_rate);
+        estimated_frame_err2(corrected_frame_ind) = 0;
+        estimated_frame_err_rate = mean(estimated_frame_err2);
 
-    % %% ----------------------------------
-    % % 5. evaluate 
-    % fprintf('SC actual BER: %f\n', mean(pkt_ber_from_rxtx_bit, 2));
+    elseif strcmp(method_FEC, FEC_DIVERSITY_GAIN)
+        % DIVERSITY_GAIN is estimated by increasing SNR, 
+        % so the frame is corrupted when number of error rate > 0
+        estimated_frame_err_rate = mean(estimated_frame_err);
 
-    % err_sc_pkt_ber_preamble_from_actual_snr_mean = abs(mean(pkt_ber_preamble_from_actual_snr_mean, 2) - mean(pkt_ber_from_rxtx_bit, 2) );
-    % err_sc_pkt_ber_preamble_from_guessed_evm_mean = abs(mean(pkt_ber_preamble_from_guessed_evm_mean, 2) - mean(pkt_ber_from_rxtx_bit, 2) );
-    % err_sc_pkt_ber_preamble_from_actual_evm_mean = abs(mean(pkt_ber_preamble_from_actual_evm_mean, 2) - mean(pkt_ber_from_rxtx_bit, 2) );
-    % fprintf('error sc preamble_from_actual_snr_mean: %f\n', err_sc_pkt_ber_preamble_from_actual_snr_mean);
-    % fprintf('error sc preamble_from_guessed_evm_mean: %f\n', err_sc_pkt_ber_preamble_from_guessed_evm_mean);
-    % fprintf('error sc preamble_from_actual_evm_mean: %f\n', err_sc_pkt_ber_preamble_from_actual_evm_mean);
+        % method 2
+        estimated_frame_err_rate = mean(estimated_frame_err2);
 
-    % err_sc_pkt_ber_preamble_from_actual_snr_calculation = abs(mean(pkt_ber_preamble_from_actual_snr_calculation, 2) - mean(pkt_ber_from_rxtx_bit, 2) );
-    % err_sc_pkt_ber_preamble_from_guessed_evm_calculation = abs(mean(pkt_ber_preamble_from_guessed_evm_calculation, 2) - mean(pkt_ber_from_rxtx_bit, 2) );
-    % err_sc_pkt_ber_preamble_from_actual_evm_calculation = abs(mean(pkt_ber_preamble_from_actual_evm_calculation, 2) - mean(pkt_ber_from_rxtx_bit, 2) );
-    % fprintf('error sc preamble_from_actual_snr_calculation: %f\n', err_sc_pkt_ber_preamble_from_actual_snr_calculation);
-    % fprintf('error sc preamble_from_guessed_evm_calculation: %f\n', err_sc_pkt_ber_preamble_from_guessed_evm_calculation);
-    % fprintf('error sc preamble_from_actual_evm_calculation: %f\n', err_sc_pkt_ber_preamble_from_actual_evm_calculation);
+    else
+        error('wrong method to estimate frame error rate\n');
+    end
 
-    % err_sc_pkt_ber_entire_from_actual_snr_mean = abs(mean(pkt_ber_entire_from_actual_snr_mean, 2) - mean(pkt_ber_from_rxtx_bit, 2) );
-    % err_sc_pkt_ber_entire_from_guessed_evm_mean = abs(mean(pkt_ber_entire_from_guessed_evm_mean, 2) - mean(pkt_ber_from_rxtx_bit, 2) );
-    % err_sc_pkt_ber_entire_from_actual_evm_mean = abs(mean(pkt_ber_entire_from_actual_evm_mean, 2) - mean(pkt_ber_from_rxtx_bit, 2) );
-    % fprintf('error sc entire_from_actual_snr_mean: %f\n', err_sc_pkt_ber_entire_from_actual_snr_mean);
-    % fprintf('error sc entire_from_guessed_evm_mean: %f\n', err_sc_pkt_ber_entire_from_guessed_evm_mean);
-    % fprintf('error sc entire_from_actual_evm_mean: %f\n', err_sc_pkt_ber_entire_from_actual_evm_mean);
-
-    % err_sc_pkt_ber_entire_from_actual_snr_calculation = abs(mean(pkt_ber_entire_from_actual_snr_calculation, 2) - mean(pkt_ber_from_rxtx_bit, 2) );
-    % err_sc_pkt_ber_entire_from_guessed_evm_calculation = abs(mean(pkt_ber_entire_from_guessed_evm_calculation, 2) - mean(pkt_ber_from_rxtx_bit, 2) );
-    % err_sc_pkt_ber_entire_from_actual_evm_calculation = abs(mean(pkt_ber_entire_from_actual_evm_calculation, 2) - mean(pkt_ber_from_rxtx_bit, 2) );
-    % fprintf('error sc entire_from_actual_snr_calculation: %f\n', err_sc_pkt_ber_entire_from_actual_snr_calculation);
-    % fprintf('error sc entire_from_guessed_evm_calculation: %f\n', err_sc_pkt_ber_entire_from_guessed_evm_calculation);
-    % fprintf('error sc entire_from_actual_evm_calculation: %f\n', err_sc_pkt_ber_entire_from_actual_evm_calculation);
-
-
-    % fprintf('all actual BER: %f\n', mean(mean(pkt_ber_from_rxtx_bit)));
-    % fprintf('error all preamble_from_actual_snr_mean: %f\n', abs(mean(mean(pkt_ber_preamble_from_actual_snr_mean) ) - mean(mean(pkt_ber_from_rxtx_bit) ) ) ) ;
-    % fprintf('error all preamble_from_guessed_evm_mean: %f\n', abs(mean(mean(pkt_ber_preamble_from_guessed_evm_mean) ) - mean(mean(pkt_ber_from_rxtx_bit) ) ) );
-    % fprintf('error all preamble_from_actual_evm_mean: %f\n', abs(mean(mean(pkt_ber_preamble_from_actual_evm_mean) ) - mean(mean(pkt_ber_from_rxtx_bit) ) ) );
-
-    % fprintf('error all preamble_from_actual_snr_calculation: %f\n', abs(mean(mean(pkt_ber_preamble_from_actual_snr_calculation) ) - mean(mean(pkt_ber_from_rxtx_bit) ) ) ) ;
-    % fprintf('error all preamble_from_guessed_evm_calculation: %f\n', abs(mean(mean(pkt_ber_preamble_from_guessed_evm_calculation) ) - mean(mean(pkt_ber_from_rxtx_bit) ) ) );
-    % fprintf('error all preamble_from_actual_evm_calculation: %f\n', abs(mean(mean(pkt_ber_preamble_from_actual_evm_calculation) ) - mean(mean(pkt_ber_from_rxtx_bit) ) ) );
-
-    % fprintf('error all entire_from_actual_snr_mean: %f\n', abs(mean(mean(pkt_ber_entire_from_actual_snr_mean) ) - mean(mean(pkt_ber_from_rxtx_bit) ) ) ) ;
-    % fprintf('error all entire_from_guessed_evm_mean: %f\n', abs(mean(mean(pkt_ber_entire_from_guessed_evm_mean) ) - mean(mean(pkt_ber_from_rxtx_bit) ) ) );
-    % fprintf('error all entire_from_actual_evm_mean: %f\n', abs(mean(mean(pkt_ber_entire_from_actual_evm_mean) ) - mean(mean(pkt_ber_from_rxtx_bit) ) ) );
-
-    % fprintf('error all entire_from_actual_snr_calculation: %f\n', abs(mean(mean(pkt_ber_entire_from_actual_snr_calculation) ) - mean(mean(pkt_ber_from_rxtx_bit) ) ) ) ;
-    % fprintf('error all entire_from_guessed_evm_calculation: %f\n', abs(mean(mean(pkt_ber_entire_from_guessed_evm_calculation) ) - mean(mean(pkt_ber_from_rxtx_bit) ) ) );
-    % fprintf('error all entire_from_actual_evm_calculation: %f\n', abs(mean(mean(pkt_ber_entire_from_actual_evm_calculation) ) - mean(mean(pkt_ber_from_rxtx_bit) ) ) );
-
-
+    fprintf('estimated frame error rate = %f\n', estimated_frame_err_rate);
     
-    %
-
-
-    % %% ----------------------------------
-    % % calculate effective SNR for each packet
-    % num_pkts = floor(size(rx_grid, 2) / num_ofdm_symbol_per_pkt);
-    % fprintf('number of packets: %d\n', num_pkts);
-    % pkt_snr_preamble = zeros(num_subcarriers, num_pkts);
-    % pkt_snr_entire   = zeros(num_subcarriers, num_pkts);
-    % pkt_bit_error_rate = zeros(num_subcarriers, num_pkts);
     
-    % for pkt_i = 1:num_pkts
-    %     pkt_start_ind = (pkt_i-1) * num_ofdm_symbol_per_pkt + 1;
-    %     pkt_end_ind   = pkt_i * num_ofdm_symbol_per_pkt;
-
-    %     snr_preamble = get_snr_of_packet_preamble(snr(:, pkt_start_ind:pkt_end_ind));
-    %     pkt_snr_preamble(:, pkt_i) = snr_preamble;
-    %     if length(snr_preamble) ~= num_subcarriers
-    %         disp('wrong number of estimated SNR');
-    %     end
-
-    %     snr_entire = get_snr_of_packet_entire(snr(:, pkt_start_ind:pkt_end_ind));
-    %     pkt_snr_entire(:, pkt_i) = snr_entire;
-    %     if length(snr_entire) ~= num_subcarriers
-    %         disp('wrong number of estimated SNR');
-    %     end
-
-
-    %     % rx_bit_grid = symbol2bit(modulation, rx_slice_grid(:, pkt_start_ind:pkt_end_ind));
-    %     pkt_start_ind2 = (pkt_i-1) * 2 * num_ofdm_symbol_per_pkt + 1;
-    %     pkt_end_ind2   = pkt_i * 2 * num_ofdm_symbol_per_pkt;
-    %     rx_bit_grid = rx_bit_grid(:, pkt_start_ind2:pkt_end_ind2);
-    %     pkt_bit_error_rate(:, pkt_i) = get_bit_error_rate(rx_bit_grid, tx_bit_grid);
-
-    % end
-
-
-    % %% ----------------------------------
-    % % SNR prediction
-    % alpha = 1;
-    % ewma_preamble = ewma(pkt_snr_preamble, alpha);
-    % ewma_entire   = ewma(pkt_snr_entire, alpha);
-    % ewma_err_preamble = prediction_error(pkt_snr_preamble, ewma_preamble);
-    % ewma_err_entire   = prediction_error(pkt_snr_entire, ewma_entire);
-
-
-    % %% ----------------------------------
-    % % best SNR shift that minimize BER estimation error
-    % best_snr_shift_preamble = 0;
-    % best_diff = 1;
-    % for shift_i = -5:0.01:15
-    %     this_diff = mean(abs(SNR2BER(modulation, mean(pkt_snr_preamble, 2) - shift_i, method_snr2ber) - mean(pkt_bit_error_rate, 2) ) );
-    %     if length(this_diff) > 1
-    %         fprintf('wrong usage in getting diff: %d, %d\n', size(this_diff));
-    %     end
-
-    %     if this_diff < best_diff
-    %         best_snr_shift_preamble = shift_i;
-    %         best_diff = this_diff;
-    %     end
-    % end
-    
-    % best_snr_shift_entire = 0;
-    % best_diff = 1;
-    % for shift_i = -5:0.01:15
-    %     this_diff = mean(abs(SNR2BER(modulation, mean(pkt_snr_entire, 2) - shift_i, method_snr2ber) - mean(pkt_bit_error_rate, 2) ) );
-    %     if length(this_diff) > 1
-    %         fprintf('wrong usage in getting diff: %d, %d\n', size(this_diff));
-    %     end
-
-    %     if this_diff < best_diff
-    %         best_snr_shift_entire = shift_i;
-    %         best_diff = this_diff;
-    %     end
-    % end
-
-
-    % %% ----------------------------------
-    % % write to file
-    % ber_diff_preamble = abs(SNR2BER(modulation, mean(pkt_snr_preamble, 2), method_snr2ber) - mean(pkt_bit_error_rate, 2));
-    % ber_diff_entire   = abs(SNR2BER(modulation, mean(pkt_snr_entire, 2), method_snr2ber)   - mean(pkt_bit_error_rate, 2));
-    % ber_diff_preamble_shift = abs(SNR2BER(modulation, mean(pkt_snr_preamble, 2) - best_snr_shift_preamble, method_snr2ber) - mean(pkt_bit_error_rate, 2));
-    % ber_diff_entire_shift   = abs(SNR2BER(modulation, mean(pkt_snr_entire, 2) - best_snr_shift_entire, method_snr2ber) - mean(pkt_bit_error_rate, 2));
-    
-        
-    % fh = fopen([output_dir input_sym_file ewma_error_file], 'w');
-    % fprintf(fh, '# <preable prediction error>, <entire prediction error>, <actuall ber>, <preamble: BER diff> <entire: BER diff> <preamble shift: BER diff> <entire shift: BER diff>\n');
-    % for sc_i = 1:num_subcarriers
-    %     fprintf(fh, '%f, %f, %f, %f, %f, %f, %f\n', ...
-    %         mean(ewma_err_preamble(sc_i, :), 2), ...
-    %         mean(ewma_err_entire(sc_i, :), 2), ...
-    %         mean(pkt_bit_error_rate(sc_i, :), 2), ... 
-    %         ber_diff_preamble(sc_i, :), ...
-    %         ber_diff_entire(sc_i, :), ...
-    %         ber_diff_preamble_shift(sc_i, :), ...
-    %         ber_diff_entire_shift(sc_i, :) );
-    % end
-    % R = corrcoef(SNR2BER(modulation, mean(pkt_snr_preamble, 2), method_snr2ber), mean(pkt_bit_error_rate, 2));
-    % fprintf(fh, 'corrcoef between SNR_preamble and actual BER: %f\n', R(1, 2));
-    % R = corrcoef(SNR2BER(modulation, mean(pkt_snr_entire, 2), method_snr2ber), mean(pkt_bit_error_rate, 2));
-    % fprintf(fh, 'corrcoef between SNR_entire and actual BER: %f\n', R(1, 2));
-
-    % R = corrcoef(SNR2BER(modulation, mean(pkt_snr_preamble, 2) - best_snr_shift_preamble, method_snr2ber), mean(pkt_bit_error_rate, 2));
-    % fprintf(fh, 'corrcoef between SNR_preamble (shift) and actual BER: %f\n', R(1, 2));
-    % R = corrcoef(SNR2BER(modulation, mean(pkt_snr_entire, 2) - best_snr_shift_entire, method_snr2ber), mean(pkt_bit_error_rate, 2));
-    % fprintf(fh, 'corrcoef between SNR_entire (shift) and actual BER: %f\n', R(1, 2));
-
-    % fprintf(fh, 'best SNR shift for preamble: %f\n', best_snr_shift_preamble);
-    % fprintf(fh, 'best SNR shift for entire: %f\n', best_snr_shift_entire);
-
-    % fclose(fh);
-
-
-    % %% ----------------------------------
-    % % actual BER for all packets
-    % dlmwrite([output_dir input_sym_file '.evm.txt'], evm');
-    % dlmwrite([output_dir input_sym_file '.estimated_snr.txt'], snr');
-    % dlmwrite([output_dir input_sym_file '.actual_snr.txt'], actual_snr');
-    % dlmwrite([output_dir input_sym_file '.ber.txt'], [pkt_bit_error_rate'; mean(pkt_bit_error_rate')]);
-    % dlmwrite([output_dir input_sym_file '.actual_snr2ber.txt'], snr_err_rate);
-    
-
-
-
-
-    % %% ----------------------------------
-    % % plot
-    % plot_subcarrier_start = 1;
-    % plot_subcarrier_end   = 48;
-    % plot_symbol_start = 1;
-    % plot_symbol_end   = 1000;
-    
-    % %% ----------------------------------
-    % %   fig 0. csi over time
-    % %
-    % f0 = figure;
-    % plot(abs(data_cpx(1:end)));
-    % xlabel('symbols');
-    % ylabel('magnitude');
-    % print(f0, '-dpng', [figure_dir input_sym_file '.allmag.png']);
-    % %
-
-
-    % %% ----------------------------------
-    % % DEBUG
-    % %{
-    % disp('pkt size');
-    % dbg_index = find(abs(data_cpx(5000:end)) > 0);
-    % size(dbg_index)
-    % disp('pkt size 2');
-    % dbg_index = find(abs(data_cpx(15000:end)) > 0);
-    % size(dbg_index)
-    % disp('pkt interval');
-    % dbg_index = find(abs(data_cpx(2000:20000)) == 0);
-    % size(dbg_index)
-    % disp('pkt interval 2');
-    % dbg_index = find(abs(data_cpx(10000:20000)) == 0);
-    % size(dbg_index)
-    % %}
-
-
-    % %% ----------------------------------
-    % %   fig 1. subcarrier csi over time
-    % f1 = figure;
-    % plot(abs(rx_grid)');
-    % xlabel('symbols');
-    % ylabel('magnitude');
-    % % print(f1, '-dpsc', [figure_dir input_sym_file '.mag.ps']);
-    % print(f1, '-dpng', [figure_dir input_sym_file '.magnitude.png']);
-
-    % f1a = figure;
-    % plot(abs(rx_grid([2, 21], 1:1000))');
-    % xlabel('symbols');
-    % ylabel('magnitude');
-    % legend('subcarrier 1', 'subcarrier 21');
-    % print(f1a, '-dpsc', [figure_dir input_sym_file '.magnitude_part.ps']);
-    % % print(f1a, '-dpng', [figure_dir input_sym_file '.magnitude_part.png']);
-
-    
-
-    % %% ----------------------------------
-    % % plot
-    % %   fig 2. IQ plane
-    % f2 = figure;
-    % plot(real(rx_grid(1, 1:500)), imag(rx_grid(1, 1:500)), 'b.', ...
-    %      real(qpsk_table), imag(qpsk_table), 'r*' );
-    % xlabel('I');
-    % ylabel('Q');
-    % print(f2, '-dpsc', [figure_dir input_sym_file '.IQplane.ps']);
-    % % print(f2, '-dpng', [figure_dir input_sym_file '.IQplane.png']);
-
-
-    % %% ----------------------------------
-    % % plot
-    % %   fig 3. EVM
-    % f3 = figure;
-    % plot(evm(plot_subcarrier_start:plot_subcarrier_end, plot_symbol_start:plot_symbol_end)' );
-    % xlabel('symbols');
-    % ylabel('EVM');
-    % print(f3, '-dpng', [figure_dir input_sym_file '.evm.png']);
-
-    % f3a = figure;
-    % plot(evm([1, 21], 1:200)' );
-    % xlabel('symbols');
-    % ylabel('EVM');
-    % print(f3a, '-dpsc', [figure_dir input_sym_file '.evm_part.ps']);
-
-
-
-    % %% ----------------------------------
-    % % plot
-    % %   fig 4. SNR
-    % f4 = figure;
-    % plot(snr(plot_subcarrier_start:plot_subcarrier_end, plot_symbol_start:plot_symbol_end)' );
-    % xlabel('symbols');
-    % ylabel('SNR');
-    % print(f4, '-dpng', [figure_dir input_sym_file '.snr.png']);
-
-    % f4a = figure;
-    % plot(1:3*num_ofdm_symbol_per_pkt, snr([1], 1:3*num_ofdm_symbol_per_pkt)', 'bo-', ...
-    %      [num_ofdm_symbol_per_pkt, num_ofdm_symbol_per_pkt], [0, 50], 'r-', ...
-    %      [2*num_ofdm_symbol_per_pkt, 2*num_ofdm_symbol_per_pkt], [0, 50], 'r-');
-    % xlabel('symbols');
-    % ylabel('SNR');
-    % print(f4a, '-dpsc', [figure_dir input_sym_file '.snr_part.ps']);
-
-    % f4b = figure;
-    % plot(snr([1 21], 1:200)');
-    % xlabel('symbols');
-    % ylabel('SNR (dB)');
-    % legend('subcarrier 1', 'subcarrier 21')
-    % print(f4b, '-dpsc', [figure_dir input_sym_file '.snr_part2.ps']);
-
-
-    % %% ----------------------------------
-    % % plot
-    % %   fig 5. BER
-    % f5 = figure;
-    % plot(ber(plot_subcarrier_start:plot_subcarrier_end, plot_symbol_start:plot_symbol_end)' );
-    % xlabel('symbols');
-    % ylabel('BER');
-    % print(f5, '-dpng', [figure_dir input_sym_file '.ber.png']);
-
-    % f5a = figure;
-    % plot(1:3*num_ofdm_symbol_per_pkt, ber([1], 1:3*num_ofdm_symbol_per_pkt)', 'bo-', ...
-    %      [num_ofdm_symbol_per_pkt, num_ofdm_symbol_per_pkt], [0, 1], 'r-', ...
-    %      [2*num_ofdm_symbol_per_pkt, 2*num_ofdm_symbol_per_pkt], [0, 1], 'r-');
-    % xlabel('symbols');
-    % ylabel('BER');
-    % print(f5a, '-dpsc', [figure_dir input_sym_file '.ber_part.ps']);
-
-
-    % %% ----------------------------------
-    % % plot
-    % %   fig 6. ewma preamble
-    % f6 = figure;
-    % plot(1:size(pkt_snr_preamble, 2), pkt_snr_preamble(1, :), 'b', ...
-    %      1:size(pkt_snr_preamble, 2), ewma_err_preamble(1, 1:size(pkt_snr_preamble, 2) ), 'r');
-    %      % 1:size(pkt_snr_preamble, 2), ewma_preamble(1, 1:size(pkt_snr_preamble, 2) ), ...
-    % xlabel('packet');
-    % ylabel('SNR');
-    % legend('SNR', 'error');
-    % print(f6, '-dpsc', [figure_dir input_sym_file '.ewma_preamble.ps']);
-
-    % f6a = figure;
-    % % plot(1:num_subcarriers, pkt_snr_preamble(:, 100), 'b', ...
-    % %      1:num_subcarriers, pkt_bit_error_rate(:, 100) * 1000, 'r');
-    % plot(1:num_subcarriers, mean(pkt_snr_preamble, 2), 'b', ...
-    %      1:num_subcarriers, SNR2BER(modulation, mean(pkt_snr_preamble, 2), method_snr2ber) * 2000, 'r', ...
-    %      1:num_subcarriers, mean(pkt_bit_error_rate, 2) * 2000, 'g');
-    % xlabel('subcarrier');
-    % ylabel('SNR');
-    % legend('SNR', 'estimated BER(*2000)', 'actual BER(*2000)');
-    % print(f6a, '-dpsc', [figure_dir input_sym_file '.subcarrier_snr_preamble.ps']);
-
-    % f6b = figure;
-    % % plot(1:num_subcarriers, pkt_snr_preamble(:, 100), 'b', ...
-    % %      1:num_subcarriers, pkt_bit_error_rate(:, 100) * 1000, 'r');
-    % plot(1:num_subcarriers, mean(pkt_snr_preamble, 2), 'b', ...
-    %      1:num_subcarriers, SNR2BER(modulation, mean(pkt_snr_preamble, 2)-best_snr_shift_preamble, method_snr2ber) * 2000, 'r', ...
-    %      1:num_subcarriers, mean(pkt_bit_error_rate, 2) * 2000, 'g');
-    % xlabel('subcarrier');
-    % ylabel('SNR');
-    % legend('SNR', 'estimated BER(*2000)', 'actual BER(*2000)');
-    % print(f6b, '-dpsc', [figure_dir input_sym_file '.subcarrier_snr_preamble_shift.ps']);
-
-    
-
-    % %% ----------------------------------
-    % % plot
-    % %   fig 7. ewma entire
-    % f7 = figure;
-    % plot(1:size(pkt_snr_entire, 2), pkt_snr_entire(1, :), 'b', ...
-    %      1:size(pkt_snr_entire, 2), ewma_err_entire(1, 1:size(pkt_snr_entire, 2) ), 'r');
-    %      % 1:size(pkt_snr_entire, 2), ewma_entire(1, 1:size(pkt_snr_entire, 2) ), ...
-    % xlabel('packet');
-    % ylabel('SNR');
-    % legend('SNR', 'error');
-    % print(f7, '-dpsc', [figure_dir input_sym_file '.ewma_entire.ps']);
-
-    % f7a = figure;
-    % % plot(1:num_subcarriers, pkt_snr_entire(:, 100), 'b', ...
-    % %      1:num_subcarriers, pkt_bit_error_rate(:, 100) * 1000, 'r');
-    % plot(1:num_subcarriers, mean(pkt_snr_entire, 2), 'b', ...
-    %      1:num_subcarriers, SNR2BER(modulation, mean(pkt_snr_entire, 2), method_snr2ber) * 2000, 'r', ...
-    %      1:num_subcarriers, mean(pkt_bit_error_rate, 2) * 2000, 'g');
-    % xlabel('subcarrier');
-    % ylabel('SNR');
-    % legend('SNR', 'estimated BER(*2000)', 'actual BER(*2000)');
-    % print(f7a, '-dpsc', [figure_dir input_sym_file '.subcarrier_snr_entire.ps']);
-
-    % f7b = figure;
-    % % plot(1:num_subcarriers, pkt_snr_entire(:, 100), 'b', ...
-    % %      1:num_subcarriers, pkt_bit_error_rate(:, 100) * 1000, 'r');
-    % plot(1:num_subcarriers, mean(pkt_snr_entire, 2), 'b', ...
-    %      1:num_subcarriers, SNR2BER(modulation, mean(pkt_snr_entire, 2) - best_snr_shift_entire, method_snr2ber) * 2000, 'r', ...
-    %      1:num_subcarriers, mean(pkt_bit_error_rate, 2) * 2000, 'g');
-    % xlabel('subcarrier');
-    % ylabel('SNR');
-    % legend('SNR', 'estimated BER(*2000)', 'actual BER(*2000)');
-    % print(f7b, '-dpsc', [figure_dir input_sym_file '.subcarrier_snr_entire_shift.ps']);
-
-    
-
-    % %% ----------------------------------
-    % % plot
-    % %   fig 8. actual pkt error rate
-    % f8 = figure;
-    % plot(pkt_bit_error_rate([1 21], :)' );
-    % xlabel('packet');
-    % ylabel('actual error rate');
-    % print(f8, '-dpsc', [figure_dir input_sym_file '.actual_ber.ps']);
-
-    % f8a = figure;
-    % plot(mean(pkt_bit_error_rate, 2));
-    % xlabel('subcarrier');
-    % ylabel('actual error rate');
-    % print(f8a, '-dpsc', [figure_dir input_sym_file '.subcarrier_actual_ber.ps']);
-    
-
-    % f8b = figure;
-    % plot(1:num_subcarriers, mean(ewma_err_preamble, 2), ...
-    %      1:num_subcarriers, mean(ewma_err_entire, 2) );
-    % xlabel('subcarrier');
-    % ylabel('SNR prediction error');
-    % legend('preamble', 'entire');
-    % print(f8b, '-dpsc', [figure_dir input_sym_file '.subcarrier_ewma_error.ps']);
-
-    
-
-    % %% ----------------------------------
-    % % plot
-    % %   fig 9.
-    % f9 = figure;
-    % plot(min_snr:gran_snr:max_snr, snr_err_rate, 'r*');
-    % hold on;
-    % x_values = -10:0.1:50;
-    % y_values_bpsk = SNR2BER('BPSK', x_values, method_snr2ber);
-    % y_values_qpsk = SNR2BER('QPSK', x_values, method_snr2ber);
-    % y_values_16qam = SNR2BER('16QAM', x_values, method_snr2ber);
-    % y_values_qpsk_shift = SNR2BER(modulation, x_values+1, method_snr2ber);
-    % plot(x_values, y_values_qpsk, ...
-    %      x_values, y_values_qpsk_shift);
-    % xlabel('SNR (dB)');
-    % ylabel('BER');
-    % legend('actual', ...
-    %        'QPSK', ...
-    %        'QPSK shift');
-    % axis([-10 15 0 0.5]);
-    % print(f9, '-dpsc', [figure_dir input_sym_file '.actual_snr2ber.ps']);
-
-
-    % %% ----------------------------------
-    % % plot
-    % %   fig 10.
-    % f10 = figure;
-    % plot(min_evm:gran_evm:max_evm, evm_err_rate, 'r*');
-    % hold on;
-    % x_values = 0:0.01:2;
-    % y_values_qpsk = SNR2BER('QPSK', EVM2SNR(x_values), method_snr2ber);
-    % y_values_qpsk_shift = SNR2BER('QPSK', EVM2SNR(x_values+1), method_snr2ber);
-    % plot(x_values, y_values_qpsk);
-    % xlabel('EVM');
-    % ylabel('BER');
-    % legend('actual', ...
-    %        'QPSK');
-    % % axis([-10 15 0 0.5]);
-    % print(f10, '-dpsc', [figure_dir input_sym_file '.actual_evm2ber.ps']);
+    dlmwrite([output_dir input_sym_file '.' method_prediction '.' method_get_ber '.' method_pkt_ber '.' method_snr2ber '.' method_FEC '.' method_estimate_frame_err '.frame.err.txt'], [actual_frame_err' estimated_frame_err]);
 
 end
 

@@ -36,16 +36,19 @@ my @rx_symbol_files = (
     # "RXDATA.s96",
     # "RXDATA.s96-2"
     # "RXDATA.static.highSNR"
-    "RXDATA.static.highSNR.2",
-    "RXDATA.static.highSNR.d1",
-    "RXDATA.static.highSNR.d1.2",
-    "RXDATA.static.highSNR.d2",
-    "RXDATA.static.highSNR.d6",
-    "RXDATA.static.highSNR.d6.2",
-    "RXDATA.mobile.highSNR",
-    "RXDATA.mobile.highSNR.1",
-    "RXDATA.mobile.highSNR.b1",
-    "RXDATA.mobile.highSNR.b2"
+    # "RXDATA.static.highSNR.2",
+    # "RXDATA.static.highSNR.d1",
+    # "RXDATA.static.highSNR.d1.2",
+    # "RXDATA.static.highSNR.d2",
+    # "RXDATA.static.highSNR.d6",
+    # "RXDATA.static.highSNR.d6.2",
+    # "RXDATA.mobile.highSNR",
+    # "RXDATA.mobile.highSNR.1",
+    # "RXDATA.mobile.highSNR.b1",
+    # "RXDATA.mobile.highSNR.b2"
+    # "RXDATA.5MHz",
+    # "RXDATA.10MHz"
+    "RXDATA.5MHz.2"
     );
 my @snr_files = (
     # "SNRDATA.static.d0", "SNRDATA.static.d6", 

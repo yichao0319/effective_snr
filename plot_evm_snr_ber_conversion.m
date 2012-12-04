@@ -48,11 +48,14 @@ function plot_evm_snr_ber_conversion()
     figure_dir = '/v/filer4b/v27q002/ut-wireless/yichao/mobile_streaming/effective_snr/figures2/';
     output_dir = '/v/filer4b/v27q002/ut-wireless/yichao/mobile_streaming/effective_snr/OUTPUT/';
 
-    input_sym_files = {'RXDATA.static.d0.pdat', 'RXDATA.static.d6.pdat', 'RXDATA.mobile.2.pdat', 'RXDATA.mobile.b1.pdat', 'RXDATA.mobile.b2.pdat', 'RXDATA.s96.pdat', 'RXDATA.s96-2.pdat', 'RXDATA.static.highSNR.pdat', 'RXDATA.static.highSNR.2.pdat', 'RXDATA.static.highSNR.d1.pdat', 'RXDATA.static.highSNR.d1.2.pdat', 'RXDATA.static.highSNR.d2.pdat', 'RXDATA.static.highSNR.d6.pdat', 'RXDATA.static.highSNR.d6.2.pdat', 'RXDATA.mobile.highSNR.pdat', 'RXDATA.mobile.highSNR.1.pdat', 'RXDATA.mobile.highSNR.b1.pdat', 'RXDATA.mobile.highSNR.b2.pdat'};
+    % input_sym_files = {'RXDATA.static.d0.pdat', 'RXDATA.static.d6.pdat', 'RXDATA.mobile.2.pdat', 'RXDATA.mobile.b1.pdat', 'RXDATA.mobile.b2.pdat', 'RXDATA.s96.pdat', 'RXDATA.s96-2.pdat', 'RXDATA.static.highSNR.pdat', 'RXDATA.static.highSNR.2.pdat', 'RXDATA.static.highSNR.d1.pdat', 'RXDATA.static.highSNR.d1.2.pdat', 'RXDATA.static.highSNR.d2.pdat', 'RXDATA.static.highSNR.d6.pdat', 'RXDATA.static.highSNR.d6.2.pdat', 'RXDATA.mobile.highSNR.pdat', 'RXDATA.mobile.highSNR.1.pdat', 'RXDATA.mobile.highSNR.b1.pdat', 'RXDATA.mobile.highSNR.b2.pdat'};
     % input_sym_files = {'RXDATA.static.d0.pdat', 'RXDATA.static.d6.pdat'};
+    % input_sym_files = {'RXDATA.5MHz.pdat', 'RXDATA.10MHz.pdat'};
+    input_sym_files = {'RXDATA.5MHz.2.pdat'};
 
     num_subcarriers = 48;
     num_ofdm_symbol_per_pkt = 50;
+    num_bit_per_sym = 2;
     modulation = 'QPSK';
     snr_shift = 0;
     % if strcmp(method_snr2ber, SNR2BER_FORMULA)
@@ -60,10 +63,10 @@ function plot_evm_snr_ber_conversion()
     % end
     num_preamble_ofdm_sym = 2;
 
-    max_snr = 100;
+    max_snr = 200;
     min_snr = -50;
     gran_snr = 0.5;
-    max_evm = 100;
+    max_evm = 200;
     min_evm = 0;
     gran_evm = 0.05;
 
@@ -94,7 +97,8 @@ function plot_evm_snr_ber_conversion()
     
     %% ----------------------------------
     % main
-
+    fid1 = fopen([output_dir 'burst.err.txt'], 'w');
+    fid2 = fopen([output_dir 'transition.txt'], 'w');
     for file_i = 1:length(input_sym_files)
         input_sym_file = char(input_sym_files(file_i));
 
@@ -123,6 +127,7 @@ function plot_evm_snr_ber_conversion()
             pkt_start_ind_ary = [];
             sym_i = 1;
             while sym_i < num_symbols - num_subcarriers*num_ofdm_symbol_per_pkt
+                not_found = 0;
                 while ~( ( real(data_cpx(sym_i  )) < 0 & imag(data_cpx(sym_i  )) < 0 ) & ...
                          ( real(data_cpx(sym_i+1)) < 0 & imag(data_cpx(sym_i+1)) > 0 ) & ...
                          ( real(data_cpx(sym_i+2)) > 0 & imag(data_cpx(sym_i+2)) < 0 ) & ...
@@ -132,9 +137,15 @@ function plot_evm_snr_ber_conversion()
                          ( real(data_cpx(sym_i+6)) > 0 & imag(data_cpx(sym_i+6)) > 0 ) )
 
                     sym_i = sym_i + 1;
+                    if sym_i >= num_symbols - num_subcarriers*num_ofdm_symbol_per_pkt
+                        not_found = 1;
+                        break;
+                    end
                 end
-                pkt_start_ind_ary = [pkt_start_ind_ary sym_i];
-                sym_i = sym_i + num_subcarriers*num_ofdm_symbol_per_pkt;
+                if not_found == 0
+                    pkt_start_ind_ary = [pkt_start_ind_ary sym_i];
+                    sym_i = sym_i + num_subcarriers*num_ofdm_symbol_per_pkt;
+                end
 
                 % if length(pkt_start_ind_ary) > num_pkts
                 %     break;
@@ -162,7 +173,7 @@ function plot_evm_snr_ber_conversion()
 
 
         %% ----------------------------------
-        % 1. EVM and rx bits
+        % EVM and rx bits
         %   i) get EVM from closest constellation points
         [rx_slice_grid, guessed_evm] = slice(modulation, rx_grid);  % e.g. rx_slice_grid: (48 * 90x)
                                                                     % e.g. guessed_evm: (48 * 90x)
@@ -173,6 +184,7 @@ function plot_evm_snr_ber_conversion()
 
         %% ----------------------------------
         % evaluate SNR to BER, EVM to BER curve
+        %
         actual_snr = calculate_actual_SNR(rx_grid, tx_grid) + snr_shift;
         actual_evm = calculate_actual_EVM(rx_grid, tx_grid);
         [snr_err_rate, snr_cnt] = cal_actual_SNR2BER(actual_snr, rx_bit_grid, tx_bit_grid, min_snr, max_snr, gran_snr);
@@ -216,11 +228,103 @@ function plot_evm_snr_ber_conversion()
         axis([0 15 0 1]);
         print(f10, '-dpsc', [figure_dir input_sym_file '.evm2ber.ps']);
         % return;
-        
+
+
+        %% ----------------------------------
+        % evaluate the probability that the bit is corrupted 
+        %   while the previous bit or bit in the same subcarrier is also corrupted
+        %
+        cnt_err_bit = 0;
+        cnt_err_bit_burst_pre_bit = 0;
+        cnt_err_bit_burst_same_sc = 0;
+
+        cnt_transition_0 = 0;   % 0: corrupted, 1: correct
+        cnt_transition_1 = 0;
+        cnt_transition_00 = 0;  
+        cnt_transition_01 = 0;
+        cnt_transition_10 = 0;
+        cnt_transition_11 = 0;
+        for pkt_i = 1:num_pkts
+            pkt_str_bit_ind = (pkt_i-1) * num_bit_per_sym * num_ofdm_symbol_per_pkt + 1;
+            pkt_end_bit_ind = pkt_i     * num_bit_per_sym * num_ofdm_symbol_per_pkt;
+            this_rx_bit_grid = rx_bit_grid(:, pkt_str_bit_ind:pkt_end_bit_ind);
+            if size(tx_bit_grid) ~= size(this_rx_bit_grid)
+                error('wrong pkt size');
+            end
+
+            [row col] = size(this_rx_bit_grid);
+            for row_i = 1:row
+                for col_i = 1:col
+
+                    %% bust error
+                    if this_rx_bit_grid(row_i, col_i) ~= tx_bit_grid(row_i, col_i)
+                        % corrupted!
+                        cnt_err_bit = cnt_err_bit + 1;
+                        
+                        % check previous bit
+                        if col_i ~= 1
+                            if this_rx_bit_grid(row_i, col_i-1) ~= tx_bit_grid(row_i, col_i-1)
+                                cnt_err_bit_burst_pre_bit = cnt_err_bit_burst_pre_bit + 1;
+                            end
+                        end
+
+                        % check bits in other subcarriers
+                        if length(find(this_rx_bit_grid(:, col_i) ~= tx_bit_grid(:, col_i))) > 1
+                            cnt_err_bit_burst_same_sc = cnt_err_bit_burst_same_sc + 1;
+                        end
+                    end
+
+                    %% transition
+                    if col_i ~= col
+                        
+                        this_correctness = (this_rx_bit_grid(row_i, col_i) == tx_bit_grid(row_i, col_i));
+                        next_correctness = (this_rx_bit_grid(row_i, col_i+1) == tx_bit_grid(row_i, col_i+1));
+                        if this_correctness == 0
+                            cnt_transition_0 = cnt_transition_0 + 1;
+
+                            if next_correctness == 0
+                                cnt_transition_00 = cnt_transition_00 + 1;
+                            elseif next_correctness == 1
+                                cnt_transition_01 = cnt_transition_01 + 1;
+                            else
+                                error('wrong transition');
+                            end
+
+                        elseif this_correctness == 1
+                            cnt_transition_1 = cnt_transition_1 + 1;
+
+                            if next_correctness == 0
+                                cnt_transition_10 = cnt_transition_10 + 1;
+                            elseif next_correctness == 1
+                                cnt_transition_11 = cnt_transition_11 + 1;
+                            else
+                                error('wrong transition');
+                            end
+
+                        else
+                            error('wrong transition');
+                        end
+
+                    end
+                end
+            end
+        end
+
+        fprintf(fid1, '%s: %f, %f\n', input_sym_file, ...
+                                      cnt_err_bit_burst_pre_bit/cnt_err_bit, ...
+                                      cnt_err_bit_burst_same_sc/cnt_err_bit);
+        fprintf(fid2, '%s: %f, %f, %f, %f, %f\n', input_sym_file, ...
+                                      cnt_transition_11/cnt_transition_1, ...
+                                      cnt_transition_10/cnt_transition_1, ...
+                                      cnt_transition_00/cnt_transition_0, ...
+                                      cnt_transition_01/cnt_transition_0, ...
+                                      cnt_transition_0/(cnt_transition_0 + cnt_transition_1));
+
 
     end % end for all files
 
-
+    fclose(fid1);
+    fclose(fid2);
 
 
 
