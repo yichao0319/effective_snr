@@ -76,12 +76,17 @@ or use batch condor script:
 ## simulator: 
 ##   analyze traces collected from "ofdm" sending BPSK, QPSK, 16QAM, 64QAM symbols.
 ##   simulate the rate adaptation process
+##   and do the post-process
 sim_rate_adaption.m
+process.sim.output.pl
 
+e.g. batch condor script
+  perl batch_sim_rate_adaption_condor.pl
 
 
 ##########
 ## plot
+##   plot the statistics information of the traces
 plot_relationship.m
 plot the formula
 

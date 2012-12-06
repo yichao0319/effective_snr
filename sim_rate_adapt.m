@@ -12,7 +12,7 @@
 %   sim_rate_adapt('RXDATA.s96-2.pdat')
 %
 
-function sim_rate_adapt(input_sym_file)
+function sim_rate_adapt(input_sym_file, method_ber2prr)
     
 
     %% ----------------------------------
@@ -57,8 +57,8 @@ function sim_rate_adapt(input_sym_file)
     input_dir = '/v/filer4b/v27q002/ut-wireless/yichao/mobile_streaming/effective_snr/rawofdm.4modulation/';
     tx_data_file = 'tx_syms_plane.dat';
 
-    figure_dir = '/v/filer4b/v27q002/ut-wireless/yichao/mobile_streaming/effective_snr/figures/';
-    output_dir = '/v/filer4b/v27q002/ut-wireless/yichao/mobile_streaming/effective_snr/OUTPUT2/';
+    figure_dir = '/v/filer4b/v27q002/ut-wireless/yichao/mobile_streaming/effective_snr/figures_sim/';
+    output_dir = '/v/filer4b/v27q002/ut-wireless/yichao/mobile_streaming/effective_snr/OUTPUT_sim/';
 
     num_subcarriers = 48;
     num_ofdm_symbol_per_pkt = 96;
@@ -84,10 +84,15 @@ function sim_rate_adapt(input_sym_file)
     min_evm = 0;
     gran_evm = 0.05;
 
-    throughput = zeros(5, 1);
-    wrong_selection = zeros(5, 1);
+    num_schemes = 10;
+    num_modulation = 4;
+
+    throughput = zeros(num_schemes, 1);
+    wrong_selection = zeros(num_schemes, 1);
     throughput_table = [1 2 4 6];
-    fid = fopen([output_dir input_sym_file '.out'], 'w');
+    fid = fopen([output_dir input_sym_file '.' method_ber2prr '.out'], 'w');
+
+    selected_modulations = ones(num_schemes, 1);
 
 
     %% ----------------------------------
@@ -96,7 +101,13 @@ function sim_rate_adapt(input_sym_file)
     % num_bits_per_frame = num_subcarriers * num_ofdm_symbol_per_pkt * num_bit_per_sym;
     % code_rate = code_rate_k / code_rate_n;
     % fprintf('code rate = %f\n', code_rate);
-
+    fprintf(fid, 'pkt, actual BER,,,, mod, pred mod, effSNR BER (formula),,,, effSNR PRR,,,, mod, pred mod, effSNR BER (threshold),,,, effSNR PRR,,,, mod, pred mod, entire SNR BER (formula),,,, entire SNR PRR,,,, mod, pred mod, entire SNR BER (threshold),,,, entire SNR PRR,,,, mod, pred mod\n');
+    fprintf(fid, ', BPSK, QPSK, 16QAM, 64QAM, mod, pred mod, ');
+    for scheme_i = 1:(num_schemes-1)/2
+        fprintf(fid, 'BPSK, QPSK, 16QAM, 64QAM, BPSK, QPSK, 16QAM, 64QAM, mod, pred mod, ');
+    end
+    fprintf(fid, '\n');
+    % fprintf(fid, 'pkt, actual BER,,,, modulation, effSNR BER (formula),,,, effSNR prr (formula),,,, modulation; effSNR BER (threshold),,,, effSNR prr (threshold),,,, modulation; entire BER (formula),,,, entire prr (formula),,,, modulation; entire BER (threshold),,,, entire prr (threshold),,,, modulation;\npkt_i: BPSK, QPSK, 16QAM, 64QAM, selected_ind; BPSK, QPSK, 16QAM, 64QAM, BPSK, QPSK, 16QAM, 64QAM, selected_ind; BPSK, QPSK, 16QAM, 64QAM, BPSK, QPSK, 16QAM, 64QAM, selected_ind; BPSK, QPSK, 16QAM, 64QAM, BPSK, QPSK, 16QAM, 64QAM, selected_ind; BPSK, QPSK, 16QAM, 64QAM, BPSK, QPSK, 16QAM, 64QAM, selected_ind\n')
 
     
     %% ----------------------------------
@@ -143,6 +154,7 @@ function sim_rate_adapt(input_sym_file)
     % if num_pkts ~= 499
     %     error('wrong number of input pkt');
     % end
+
 
 
     for pkt_i = 1:num_pkts
@@ -192,16 +204,33 @@ function sim_rate_adapt(input_sym_file)
         actual_bers = [actual_ber_BPSK, actual_ber_QPSK, actual_ber_16QAM, actual_ber_64QAM];
 
         % oracle throughput
+        scheme_index = 1;
         min_ber = min(actual_bers);
         min_ber_ind = find(actual_bers == min_ber);
         selected_ind = min_ber_ind(end);
         fprintf('pkt %d: oracle=(%d, %f), ', pkt_i, selected_ind, min_ber);
         fprintf(fid, '%d: %f, %f, %f, %f, %d; ', pkt_i, actual_ber_BPSK, actual_ber_QPSK, actual_ber_16QAM, actual_ber_64QAM, selected_ind);
+        % fprintf('-- a) %d: %f, %f, %f, %f, %d; \n', pkt_i, actual_ber_BPSK, actual_ber_QPSK, actual_ber_16QAM, actual_ber_64QAM, selected_ind);
         if min_ber == 0
-            throughput(1) = throughput(1) + throughput_table(selected_ind);
+            throughput(scheme_index) = throughput(scheme_index) + throughput_table(selected_ind);
         else
-            wrong_selection(1) = wrong_selection(1) + 1;
+            wrong_selection(scheme_index) = wrong_selection(scheme_index) + 1;
         end
+
+        % oracle prediction throughput
+        scheme_index = scheme_index + 1;
+        new_selected_modulation = selected_ind;
+        selected_ind = selected_modulations(scheme_index);
+        fprintf('predicted oracle=(%d, %f), ', selected_ind, actual_bers(selected_ind));
+        fprintf(fid, '%d; ', selected_ind);
+        if actual_bers(selected_ind) == 0
+            throughput(scheme_index) = throughput(scheme_index) + throughput_table(selected_ind);
+        else
+            wrong_selection(scheme_index) = wrong_selection(scheme_index) + 1;
+        end
+        selected_modulations(scheme_index) = new_selected_modulation;
+
+
 
 
         %% -------------------------
@@ -242,17 +271,22 @@ function sim_rate_adapt(input_sym_file)
         end
 
         % packet reception rate (PRR) for effective SNR -- without FEC
-        prr_eff_snr_formula_BPSK = power(1-mean(ber_eff_snr_formula_BPSK), num_subcarriers*num_ofdm_symbol_per_pkt);
-        prr_eff_snr_formula_QPSK = power(1-mean(ber_eff_snr_formula_QPSK), num_subcarriers*num_ofdm_symbol_per_pkt);
-        prr_eff_snr_formula_16QAM = power(1-mean(ber_eff_snr_formula_16QAM), num_subcarriers*num_ofdm_symbol_per_pkt);
-        prr_eff_snr_formula_64QAM = power(1-mean(ber_eff_snr_formula_64QAM), num_subcarriers*num_ofdm_symbol_per_pkt);
+        prr_eff_snr_formula_BPSK = ber2prr(method_ber2prr, 'BPSK', mean(ber_eff_snr_formula_BPSK), num_subcarriers*num_ofdm_symbol_per_pkt); %power(1-mean(ber_eff_snr_formula_BPSK), num_subcarriers*num_ofdm_symbol_per_pkt);
+        prr_eff_snr_formula_QPSK = ber2prr(method_ber2prr, 'QPSK', mean(ber_eff_snr_formula_QPSK), num_subcarriers*num_ofdm_symbol_per_pkt); %power(1-mean(ber_eff_snr_formula_QPSK), num_subcarriers*num_ofdm_symbol_per_pkt);
+        prr_eff_snr_formula_16QAM = ber2prr(method_ber2prr, '16QAM', mean(ber_eff_snr_formula_16QAM), num_subcarriers*num_ofdm_symbol_per_pkt); %power(1-mean(ber_eff_snr_formula_16QAM), num_subcarriers*num_ofdm_symbol_per_pkt);
+        prr_eff_snr_formula_64QAM = ber2prr(method_ber2prr, '64QAM', mean(ber_eff_snr_formula_64QAM), num_subcarriers*num_ofdm_symbol_per_pkt); %power(1-mean(ber_eff_snr_formula_64QAM), num_subcarriers*num_ofdm_symbol_per_pkt);
+        if length(prr_eff_snr_formula_BPSK) ~= 1
+            size(prr_eff_snr_formula_BPSK)
+            error('wrong ber length');
+        end
 
-        prr_eff_snr_threshold_BPSK = power(1-mean(ber_eff_snr_threshold_BPSK), num_subcarriers*num_ofdm_symbol_per_pkt);
-        prr_eff_snr_threshold_QPSK = power(1-mean(ber_eff_snr_threshold_QPSK), num_subcarriers*num_ofdm_symbol_per_pkt);
-        prr_eff_snr_threshold_16QAM = power(1-mean(ber_eff_snr_threshold_16QAM),num_subcarriers*num_ofdm_symbol_per_pkt);
-        prr_eff_snr_threshold_64QAM = power(1-mean(ber_eff_snr_threshold_64QAM),num_subcarriers*num_ofdm_symbol_per_pkt);
+        prr_eff_snr_threshold_BPSK = ber2prr(method_ber2prr, 'BPSK', mean(ber_eff_snr_threshold_BPSK), num_subcarriers*num_ofdm_symbol_per_pkt); %power(1-mean(ber_eff_snr_threshold_BPSK), num_subcarriers*num_ofdm_symbol_per_pkt);
+        prr_eff_snr_threshold_QPSK = ber2prr(method_ber2prr, 'QPSK', mean(ber_eff_snr_threshold_QPSK), num_subcarriers*num_ofdm_symbol_per_pkt); %power(1-mean(ber_eff_snr_threshold_QPSK), num_subcarriers*num_ofdm_symbol_per_pkt);
+        prr_eff_snr_threshold_16QAM = ber2prr(method_ber2prr, '16QAM', mean(ber_eff_snr_threshold_16QAM), num_subcarriers*num_ofdm_symbol_per_pkt); %power(1-mean(ber_eff_snr_threshold_16QAM),num_subcarriers*num_ofdm_symbol_per_pkt);
+        prr_eff_snr_threshold_64QAM = ber2prr(method_ber2prr, '64QAM', mean(ber_eff_snr_threshold_64QAM), num_subcarriers*num_ofdm_symbol_per_pkt); %power(1-mean(ber_eff_snr_threshold_64QAM),num_subcarriers*num_ofdm_symbol_per_pkt);
 
         % effective SNR throughput
+        scheme_index = scheme_index + 1;
         if prr_eff_snr_formula_64QAM >= 0.9
             selected_ind = 4;
         elseif prr_eff_snr_formula_16QAM >= 0.9
@@ -263,13 +297,29 @@ function sim_rate_adapt(input_sym_file)
             selected_ind = 1;
         end
         fprintf('effSNR1=(%d, %f), ', selected_ind, actual_bers(selected_ind));
-        fprintf(fid, '%f, %f, %f, %f; %f, %f, %f, %f, %d; ', ber_eff_snr_formula_BPSK, ber_eff_snr_formula_QPSK, ber_eff_snr_formula_16QAM, ber_eff_snr_formula_64QAM, prr_eff_snr_formula_BPSK, prr_eff_snr_formula_QPSK, prr_eff_snr_formula_16QAM, prr_eff_snr_formula_64QAM, selected_ind);
+        fprintf(fid, '%f, %f, %f, %f; %f, %f, %f, %f, %d; ', mean(ber_eff_snr_formula_BPSK), mean(ber_eff_snr_formula_QPSK), mean(ber_eff_snr_formula_16QAM), mean(ber_eff_snr_formula_64QAM), prr_eff_snr_formula_BPSK, prr_eff_snr_formula_QPSK, prr_eff_snr_formula_16QAM, prr_eff_snr_formula_64QAM, selected_ind);
         if actual_bers(selected_ind) == 0
-            throughput(2) = throughput(2) + throughput_table(selected_ind);
+            throughput(scheme_index) = throughput(scheme_index) + throughput_table(selected_ind);
         else
-            wrong_selection(2) = wrong_selection(2) + 1;
+            wrong_selection(scheme_index) = wrong_selection(scheme_index) + 1;
         end
 
+        % effective SNR throughput with prediction
+        scheme_index = scheme_index + 1;
+        new_selected_modulation = selected_ind;
+        selected_ind = selected_modulations(scheme_index);
+        fprintf('predicted effSNR1=(%d, %f), ', selected_ind, actual_bers(selected_ind));
+        fprintf(fid, '%d; ', selected_ind);
+        if actual_bers(selected_ind) == 0
+            throughput(scheme_index) = throughput(scheme_index) + throughput_table(selected_ind);
+        else
+            wrong_selection(scheme_index) = wrong_selection(scheme_index) + 1;
+        end
+        selected_modulations(scheme_index) = new_selected_modulation;
+
+
+        % effective SNR throughput (threshold)
+        scheme_index = scheme_index + 1;
         if prr_eff_snr_threshold_64QAM >= 0.9
             selected_ind = 4;
         elseif prr_eff_snr_threshold_16QAM >= 0.9
@@ -280,12 +330,25 @@ function sim_rate_adapt(input_sym_file)
             selected_ind = 1;
         end
         fprintf('effSNR2=(%d, %f), ', selected_ind, actual_bers(selected_ind));
-        fprintf(fid, '%f, %f, %f, %f; %f, %f, %f, %f, %d; ', ber_eff_snr_threshold_BPSK, ber_eff_snr_threshold_QPSK, ber_eff_snr_threshold_16QAM, ber_eff_snr_threshold_64QAM, prr_eff_snr_threshold_BPSK, prr_eff_snr_threshold_QPSK, prr_eff_snr_threshold_16QAM, prr_eff_snr_threshold_64QAM, selected_ind);
+        fprintf(fid, '%f, %f, %f, %f; %f, %f, %f, %f, %d; ', mean(ber_eff_snr_threshold_BPSK), mean(ber_eff_snr_threshold_QPSK), mean(ber_eff_snr_threshold_16QAM), mean(ber_eff_snr_threshold_64QAM), prr_eff_snr_threshold_BPSK, prr_eff_snr_threshold_QPSK, prr_eff_snr_threshold_16QAM, prr_eff_snr_threshold_64QAM, selected_ind);
         if actual_bers(selected_ind) == 0
-            throughput(3) = throughput(3) + throughput_table(selected_ind);
+            throughput(scheme_index) = throughput(scheme_index) + throughput_table(selected_ind);
         else
-            wrong_selection(3) = wrong_selection(3) + 1;
+            wrong_selection(scheme_index) = wrong_selection(scheme_index) + 1;
         end
+
+        % effective SNR throughput with prediction (threshold)
+        scheme_index = scheme_index + 1;
+        new_selected_modulation = selected_ind;
+        selected_ind = selected_modulations(scheme_index);
+        fprintf('predicted effSNR2=(%d, %f), ', selected_ind, actual_bers(selected_ind));
+        fprintf(fid, '%d; ', selected_ind);
+        if actual_bers(selected_ind) == 0
+            throughput(scheme_index) = throughput(scheme_index) + throughput_table(selected_ind);
+        else
+            wrong_selection(scheme_index) = wrong_selection(scheme_index) + 1;
+        end
+        selected_modulations(scheme_index) = new_selected_modulation;
 
 
         %% -------------------------
@@ -304,17 +367,18 @@ function sim_rate_adapt(input_sym_file)
         end
 
         % packet reception rate (PRR) for using entire SNR -- without FEC
-        prr_entire_snr_formula_BPSK = power(1-mean(ber_entire_snr_formula_BPSK), num_subcarriers*num_ofdm_symbol_per_pkt);
-        prr_entire_snr_formula_QPSK = power(1-mean(ber_entire_snr_formula_QPSK), num_subcarriers*num_ofdm_symbol_per_pkt);
-        prr_entire_snr_formula_16QAM = power(1-mean(ber_entire_snr_formula_16QAM), num_subcarriers*num_ofdm_symbol_per_pkt);
-        prr_entire_snr_formula_64QAM = power(1-mean(ber_entire_snr_formula_64QAM), num_subcarriers*num_ofdm_symbol_per_pkt);
+        prr_entire_snr_formula_BPSK = ber2prr(method_ber2prr, 'BPSK', mean(ber_entire_snr_formula_BPSK), num_subcarriers*num_ofdm_symbol_per_pkt); %power(1-mean(ber_entire_snr_formula_BPSK), num_subcarriers*num_ofdm_symbol_per_pkt);
+        prr_entire_snr_formula_QPSK = ber2prr(method_ber2prr, 'QPSK', mean(ber_entire_snr_formula_QPSK), num_subcarriers*num_ofdm_symbol_per_pkt); %power(1-mean(ber_entire_snr_formula_QPSK), num_subcarriers*num_ofdm_symbol_per_pkt);
+        prr_entire_snr_formula_16QAM = ber2prr(method_ber2prr, '16QAM', mean(ber_entire_snr_formula_16QAM), num_subcarriers*num_ofdm_symbol_per_pkt); %power(1-mean(ber_entire_snr_formula_16QAM), num_subcarriers*num_ofdm_symbol_per_pkt);
+        prr_entire_snr_formula_64QAM = ber2prr(method_ber2prr, '64QAM', mean(ber_entire_snr_formula_64QAM), num_subcarriers*num_ofdm_symbol_per_pkt); %power(1-mean(ber_entire_snr_formula_64QAM), num_subcarriers*num_ofdm_symbol_per_pkt);
 
-        prr_entire_snr_threshold_BPSK = power(1-mean(ber_entire_snr_threshold_BPSK), num_subcarriers*num_ofdm_symbol_per_pkt);
-        prr_entire_snr_threshold_QPSK = power(1-mean(ber_entire_snr_threshold_QPSK), num_subcarriers*num_ofdm_symbol_per_pkt);
-        prr_entire_snr_threshold_16QAM = power(1-mean(ber_entire_snr_threshold_16QAM), num_subcarriers*num_ofdm_symbol_per_pkt);
-        prr_entire_snr_threshold_64QAM = power(1-mean(ber_entire_snr_threshold_64QAM), num_subcarriers*num_ofdm_symbol_per_pkt);
+        prr_entire_snr_threshold_BPSK = ber2prr(method_ber2prr, 'BPSK', mean(ber_entire_snr_threshold_BPSK), num_subcarriers*num_ofdm_symbol_per_pkt); %power(1-mean(ber_entire_snr_threshold_BPSK), num_subcarriers*num_ofdm_symbol_per_pkt);
+        prr_entire_snr_threshold_QPSK = ber2prr(method_ber2prr, 'QPSK', mean(ber_entire_snr_threshold_QPSK), num_subcarriers*num_ofdm_symbol_per_pkt); %power(1-mean(ber_entire_snr_threshold_QPSK), num_subcarriers*num_ofdm_symbol_per_pkt);
+        prr_entire_snr_threshold_16QAM = ber2prr(method_ber2prr, '16QAM', mean(ber_entire_snr_threshold_16QAM), num_subcarriers*num_ofdm_symbol_per_pkt); %power(1-mean(ber_entire_snr_threshold_16QAM), num_subcarriers*num_ofdm_symbol_per_pkt);
+        prr_entire_snr_threshold_64QAM = ber2prr(method_ber2prr, '64QAM', mean(ber_entire_snr_threshold_64QAM), num_subcarriers*num_ofdm_symbol_per_pkt); %power(1-mean(ber_entire_snr_threshold_64QAM), num_subcarriers*num_ofdm_symbol_per_pkt);
 
         % entire SNR throughput
+        scheme_index = scheme_index + 1;
         if prr_entire_snr_formula_64QAM >= 0.9
             selected_ind = 4;
         elseif prr_entire_snr_formula_16QAM >= 0.9
@@ -325,13 +389,29 @@ function sim_rate_adapt(input_sym_file)
             selected_ind = 1;
         end
         fprintf('entireSNR1=(%d, %f), ', selected_ind, actual_bers(selected_ind));
-        fprintf(fid, '%f, %f, %f, %f; %f, %f, %f, %f, %d; ', ber_entire_snr_formula_BPSK, ber_entire_snr_formula_QPSK, ber_entire_snr_formula_16QAM, ber_entire_snr_formula_64QAM, prr_entire_snr_formula_BPSK, prr_entire_snr_formula_QPSK, prr_entire_snr_formula_16QAM, prr_entire_snr_formula_64QAM, selected_ind);
+        fprintf(fid, '%f, %f, %f, %f; %f, %f, %f, %f, %d; ', mean(ber_entire_snr_formula_BPSK), mean(ber_entire_snr_formula_QPSK), mean(ber_entire_snr_formula_16QAM), mean(ber_entire_snr_formula_64QAM), prr_entire_snr_formula_BPSK, prr_entire_snr_formula_QPSK, prr_entire_snr_formula_16QAM, prr_entire_snr_formula_64QAM, selected_ind);
         if actual_bers(selected_ind) == 0
-            throughput(4) = throughput(4) + throughput_table(selected_ind);
+            throughput(scheme_index) = throughput(scheme_index) + throughput_table(selected_ind);
         else
-            wrong_selection(4) = wrong_selection(4) + 1;
+            wrong_selection(scheme_index) = wrong_selection(scheme_index) + 1;
         end
 
+        % entire SNR throughput with prediction
+        scheme_index = scheme_index + 1;
+        new_selected_modulation = selected_ind;
+        selected_ind = selected_modulations(scheme_index);
+        fprintf('predicted entireSNR1=(%d, %f), ', selected_ind, actual_bers(selected_ind));
+        fprintf(fid, '%d; ', selected_ind);
+        if actual_bers(selected_ind) == 0
+            throughput(scheme_index) = throughput(scheme_index) + throughput_table(selected_ind);
+        else
+            wrong_selection(scheme_index) = wrong_selection(scheme_index) + 1;
+        end
+        selected_modulations(scheme_index) = new_selected_modulation;
+
+
+        % entire SNR throughput (threshold)
+        scheme_index = scheme_index + 1;
         if prr_entire_snr_threshold_64QAM >= 0.9
             selected_ind = 4;
         elseif prr_entire_snr_threshold_16QAM >= 0.9
@@ -342,13 +422,31 @@ function sim_rate_adapt(input_sym_file)
             selected_ind = 1;
         end
         fprintf('entireSNR2=(%d, %f)\n', selected_ind, actual_bers(selected_ind));
-        fprintf(fid, '%f, %f, %f, %f; %f, %f, %f, %f, %d\n', ber_entire_snr_threshold_BPSK, ber_entire_snr_threshold_QPSK, ber_entire_snr_threshold_16QAM, ber_entire_snr_threshold_64QAM, prr_entire_snr_threshold_BPSK, prr_entire_snr_threshold_QPSK, prr_entire_snr_threshold_16QAM, prr_entire_snr_threshold_64QAM, selected_ind);
+        fprintf(fid, '%f, %f, %f, %f; %f, %f, %f, %f, %d; ', mean(ber_entire_snr_threshold_BPSK), mean(ber_entire_snr_threshold_QPSK), mean(ber_entire_snr_threshold_16QAM), mean(ber_entire_snr_threshold_64QAM), prr_entire_snr_threshold_BPSK, prr_entire_snr_threshold_QPSK, prr_entire_snr_threshold_16QAM, prr_entire_snr_threshold_64QAM, selected_ind);
         if actual_bers(selected_ind) == 0
-            throughput(5) = throughput(5) + throughput_table(selected_ind);
+            throughput(scheme_index) = throughput(scheme_index) + throughput_table(selected_ind);
         else
-            wrong_selection(5) = wrong_selection(5) + 1;
+            wrong_selection(scheme_index) = wrong_selection(scheme_index) + 1;
         end
 
+        % entire SNR throughput with prediction (threshold)
+        scheme_index = scheme_index + 1;
+        new_selected_modulation = selected_ind;
+        selected_ind = selected_modulations(scheme_index);
+        fprintf('predicted entireSNR2=(%d, %f), ', selected_ind, actual_bers(selected_ind));
+        fprintf(fid, '%d; ', selected_ind);
+        if actual_bers(selected_ind) == 0
+            throughput(scheme_index) = throughput(scheme_index) + throughput_table(selected_ind);
+        else
+            wrong_selection(scheme_index) = wrong_selection(scheme_index) + 1;
+        end
+        selected_modulations(scheme_index) = new_selected_modulation;
+        
+
+        if scheme_index ~= num_schemes
+            error('wrong number of schemes');
+        end
+        fprintf(fid, '\n');
     end
 
 
@@ -571,6 +669,36 @@ function [syms_BPSK, syms_QPSK, syms_16QAM, syms_64QAM] = partition_one_pkt(pkt_
     syms_64QAM = pkt_syms(1+a+b+c:a+b+c+d, 1);
 end
 
+
+%% ber2prr: function description
+function [prr] = ber2prr(method, modulation, ber, num_bits)
+    if strcmp(method, 'FORMULA')
+        prr = power(1-ber, num_bits);
+    elseif strcmp(method, 'THRESHOLD')
+        if strcmp(modulation, 'BPSK')
+            prr = power(1-ber, num_bits);
+        elseif strcmp(modulation, 'QPSK')
+            if ber > 0.001
+                prr = 0;
+            else
+                prr = 1;
+            end
+        elseif strcmp(modulation, '16QAM')
+            if ber > 0.000207
+                prr = 0;
+            else
+                prr = 1;
+            end
+        elseif strcmp(modulation, '64QAM')
+            if ber > 0.0026631
+                prr = 0;
+            else
+                prr = 1;
+            end
+        end
+    end
+end
+    
 
 
 
