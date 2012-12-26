@@ -11,11 +11,12 @@ my $mother_script = "batch_sim_rate_adapt_3";
 my @files = 1 .. 4;
 my @method_SNRs = ("preambleSNR", "allSNR", "allSNRoracle");
 # my @method_RAs = ("Thresholding");
-my @method_RAs = ("Thresholding", "Probability");
+my @method_RAs = ("Thresholding", "Probability_1", "Probability_2");
 my @method_PREDs = ("currPkt", "prevPkt", "EWMA", "HW");
 my @thresholds1 = (map 0.01*$_, 80..100);
-my @thresholds2 = (map 0.01*$_, 30..45);
-my %thresholds = ($method_RAs[0] => \@thresholds1, $method_RAs[1] => \@thresholds2);
+my @thresholds2 = (map 0.01*$_, 95..100);
+my @thresholds3 = (map 0.01*$_, 95..100);
+my %thresholds = ($method_RAs[0] => \@thresholds1, $method_RAs[1] => \@thresholds2, $method_RAs[2] => \@thresholds3);
 
 
 my $file_i = 0;
