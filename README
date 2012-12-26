@@ -56,8 +56,15 @@ or run in the batch script:
 
 
 ##########
-## analyzer: analyze traces collected from "ofdm" sending QPSK symbols
-analyze_csi.m
+## analyzer
+Analyze traces collected from "ofdm" sending QPSK symbols.
+
+- codes:
+  analyze_csi.m
+
+- input dir : ./PARSEDDATA
+  output dir: ./OUTPUT
+  output fig: ./figures
 
 e.g.
   analyze_csi('RXDATA.s96.pdat', 'SNRDATA.s96.pdat');
@@ -73,25 +80,63 @@ or use batch condor script:
 
 
 ##########
-## simulator: 
-##   analyze traces collected from "ofdm" sending BPSK, QPSK, 16QAM, 64QAM symbols.
-##   simulate the rate adaptation process
-##   and do the post-process
-sim_rate_adaption.m
-process.sim.output.pl
+## simulator1: 
+The simulator for Rate Adaptation.
+It analyzes traces collected from "ofdm" sending BPSK, QPSK, 16QAM, 64QAM symbols
+and simulate the rate adaptation process
+and do the post-process
+
+- codes:
+  sim_rate_adapt.m
+  process.sim.output.pl
+
+- input dir : ./rawofdm.4modulation/
+  output dir: ./OUTPUT_sim/
+  output fig: ./figures_sim/
 
 e.g. batch condor script
   perl batch_sim_rate_adaption_condor.pl
 
 
 ##########
-## plot
-##   plot the statistics information of the traces
-plot_relationship.m
-plot the formula
+## simulator2: 
+The simulator for Rate Adaptation.
+Similar to simulator1, but take SNR and BER processed by ../gen_traces/gen_traces.m
+The stragetory for RA is not finalized yet, currently: 
+  i) EffSNR: get the first 1 actual SNR as the SNR for 
 
-plot_evm_snr_ber_conversion.m
-plot the measured EVM, SNR, and BER
+- codes:
+  sim_rate_adapt2.m
+
+- input dir : ../gen_traces/PARSEDDATA/
+  output dir: ./OUTPUT_sim/
+
+
+##########
+## simulator3: 
+The simulator for Rate Adaptation.
+Based on simulator2, but make it more general/complete 
+
+- codes:
+  sim_rate_adapt3.m
+  
+- input dir : ../gen_traces/PARSEDDATA/
+  output dir: ./OUTPUT_sim/
+  
+
+##########
+## plot
+plot the statistics information of the traces
+
+- codes:
+  - plot the formula:
+    plot_relationship.m
+
+  - plot the measured EVM, SNR, and BER:
+    plot_evm_snr_ber_conversion.m
+
+
+
 
 
 ##########

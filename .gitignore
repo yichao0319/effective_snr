@@ -1,0 +1,36 @@
+#####
+## from Apurv
+README_rawofdm
+
+
+#####
+## exec
+parse.snr
+parse.symbols
+parse.txdata
+parse.complex
+
+
+#####
+## other codes
+plot_IQ_plane.plot
+batch_analyze_csi1*
+batch_analyze_csi2*
+batch_analyze_csi3*
+batch_analyze_csi4*
+batch_analyze_csi5*
+batch_analyze_csi6*
+batch_analyze_csi7*
+batch_analyze_csi8*
+batch_analyze_csi9*
+batch_sim_rate_adapt1*
+batch_sim_rate_adapt2*
+batch_sim_rate_adapt3*
+batch_sim_rate_adapt4*
+
+test_*
+
+
+#####
+## backup
+*tar.gz

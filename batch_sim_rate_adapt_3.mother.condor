@@ -1,0 +1,17 @@
++Group = "GRAD" 
++Project = "NETWORKING_MULTIMEDIA" 
++ProjectDescription = "simulator for rate adaptation using different schemes"
+
+Universe = vanilla
+
+executable = /bin/sh
+arguments = batch_sim_rate_adapt_3.sh
+Requirements = Memory >= 4000
+Rank = Memory >= 6000
+
+
+Error = /v/filer4b/v27q002/ut-wireless/yichao/mobile_streaming/effective_snr/OUTPUT_sim_3/condor.err
+Output = /v/filer4b/v27q002/ut-wireless/yichao/mobile_streaming/effective_snr/OUTPUT_sim_3/condor.output
+
+Queue 1
+

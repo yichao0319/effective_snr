@@ -6,7 +6,7 @@ function prediction = ewma(timeseries, alpha)
         if ti == 1
             prediction(:, 2) = timeseries(:, 1);
         else
-            prediction(:, ti+1) = alpha * timeseries(:, ti) + (1-alpha) * prediction(:, ti);
+            prediction(:, ti+1) = alpha .* timeseries(:, ti) + (1-alpha) .* prediction(:, ti);
         end
     end
 end

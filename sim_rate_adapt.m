@@ -50,6 +50,11 @@ function sim_rate_adapt(input_sym_file, method_ber2prr)
     DEBUG_EXCEL_CHECK = 0;
     DEBUG_EVALUATE_FORMULA = 0;
 
+    CONST_BER_SHIFT_BPSK = 0;
+    CONST_BER_SHIFT_QPSK = 0.000133509;
+    CONST_BER_SHIFT_16QAM = 0.000131142;
+    CONST_BER_SHIFT_64QAM = 0.00407008;
+
     
     
     %% ----------------------------------
